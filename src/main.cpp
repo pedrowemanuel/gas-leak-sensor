@@ -10,7 +10,7 @@
 #include <AsyncTCP.h>
 #include "LittleFS.h"
 
-#define SSID_ESP "ESP-WIFI-MANAGER-GAS-LEAK-SENSOR:0001"
+#define SSID_ESP "GAS-LEAK-SENSOR:0001"
 
 // Create AsyncWebServer object on port 80
 AsyncWebServer server(80);
