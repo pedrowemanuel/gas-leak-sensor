@@ -10,6 +10,8 @@
 #include <AsyncTCP.h>
 #include "LittleFS.h"
 
+#define SSID_ESP "ESP-WIFI-MANAGER-GAS-LEAK-SENSOR:0001"
+
 // Create AsyncWebServer object on port 80
 AsyncWebServer server(80);
 
@@ -196,6 +198,19 @@ void setup()
               {
       digitalWrite(ledPin, LOW);
       request->send(LittleFS, "/index.html", "text/html", false, processor); });
+
+    // Route to set GPIO state to LOW
+    server.on("/reset", HTTP_GET, [](AsyncWebServerRequest *request)
+              {
+
+          writeFile(LittleFS, ssidPath, "");
+          writeFile(LittleFS, passPath, "");
+          writeFile(LittleFS, ipPath, "");
+
+          request->send(LittleFS, "/wifimanager.html", "text/html", false, processor);
+
+          esp_restart(); });
+
     server.begin();
   }
   else
@@ -203,7 +218,7 @@ void setup()
     // Connect to Wi-Fi network with SSID and password
     Serial.println("Setting AP (Access Point)");
     // NULL sets an open Access Point
-    WiFi.softAP("ESP-WIFI-MANAGER-PEDRO", NULL);
+    WiFi.softAP(SSID_ESP, NULL);
 
     IPAddress IP = WiFi.softAPIP();
     Serial.print("AP IP address: ");
@@ -256,7 +271,7 @@ void setup()
           //Serial.printf("POST[%s]: %s\n", p->name().c_str(), p->value().c_str());
         }
       }
-      request->send(200, "text/plain", "Done. ESP will restart, connect to your router and go to IP address: " + ip);
+      request->send(200, "text/plain", ip);
       delay(3000);
       ESP.restart(); });
     server.begin();
