@@ -13,11 +13,11 @@
 #define SSID_ESP "GAS-LEAK-SENSOR:200"
 #define LED_PIN 2
 #define BUZZER_PIN 23
-#define A0_PIN 26
+#define A0_PIN A0
 #define D0_PIN 25
 
 // Your threshold value
-int sensorThres = 4000;
+int sensorThres = 2000;
 
 // Create AsyncWebServer object on port 80
 AsyncWebServer server(80);
@@ -318,15 +318,18 @@ void setup()
 
 void loop()
 {
-  int analogSensor = analogRead(A0);
+  int analogSensor = analogRead(A0_PIN);
+  int digitalSensor = digitalRead(D0_PIN);
 
   Serial.print("Pin A0: ");
   Serial.println(analogSensor);
 
-  if (analogSensor > sensorThres)
+  Serial.print("Pin D0: ");
+  Serial.println(digitalSensor);
+
+  if (!digitalSensor)
   {
     alarmON();
-    delay(3000);
   }
   else
   {
