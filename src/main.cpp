@@ -10,7 +10,14 @@
 #include <AsyncTCP.h>
 #include "LittleFS.h"
 
-#define SSID_ESP "GAS-LEAK-SENSOR:0001"
+#define SSID_ESP "GAS-LEAK-SENSOR:200"
+#define LED_PIN 2
+#define BUZZER_PIN 23
+#define A0_PIN 26
+#define D0_PIN 25
+
+// Your threshold value
+int sensorThres = 4000;
 
 // Create AsyncWebServer object on port 80
 AsyncWebServer server(80);
@@ -45,11 +52,7 @@ IPAddress subnet(255, 255, 0, 0);
 unsigned long previousMillis = 0;
 const long interval = 10000; // interval to wait for Wi-Fi connection (milliseconds)
 
-// Set LED GPIO
-const int ledPin = 2;
-// Stores LED state
-
-String ledState;
+String alarmState;
 
 // Initialize LittleFS
 void initLittleFS()
@@ -137,7 +140,18 @@ bool initWiFi()
     }
   }
 
+  Serial.println("Connected to WiFi!");
+
+  // Printar IP e MAC
+  Serial.print("IP Address: ");
   Serial.println(WiFi.localIP());
+
+  Serial.print("MAC Address: ");
+  Serial.println(WiFi.macAddress());
+
+  Serial.print("gateway: ");
+  Serial.println(WiFi.gatewayIP());
+
   return true;
 }
 
@@ -146,17 +160,29 @@ String processor(const String &var)
 {
   if (var == "STATE")
   {
-    if (digitalRead(ledPin))
+    if (digitalRead(LED_PIN))
     {
-      ledState = "ON";
+      alarmState = "ON";
     }
     else
     {
-      ledState = "OFF";
+      alarmState = "OFF";
     }
-    return ledState;
+    return alarmState;
   }
   return String();
+}
+
+void alarmON()
+{
+  digitalWrite(LED_PIN, HIGH);
+  digitalWrite(BUZZER_PIN, HIGH);
+}
+
+void alarmOFF()
+{
+  digitalWrite(LED_PIN, LOW);
+  digitalWrite(BUZZER_PIN, LOW);
 }
 
 void setup()
@@ -167,14 +193,19 @@ void setup()
   initLittleFS();
 
   // Set GPIO 2 as an OUTPUT
-  pinMode(ledPin, OUTPUT);
-  digitalWrite(ledPin, LOW);
+  pinMode(LED_PIN, OUTPUT);
+  pinMode(BUZZER_PIN, OUTPUT); // Define o PINO do buzzer como saída
+  pinMode(A0_PIN, INPUT);
+  pinMode(D0_PIN, INPUT);
+
+  alarmOFF();
 
   // Load values saved in LittleFS
   ssid = readFile(LittleFS, ssidPath);
   pass = readFile(LittleFS, passPath);
   ip = readFile(LittleFS, ipPath);
   gateway = readFile(LittleFS, gatewayPath);
+
   Serial.println(ssid);
   Serial.println(pass);
   Serial.println(ip);
@@ -190,13 +221,13 @@ void setup()
     // Route to set GPIO state to HIGH
     server.on("/on", HTTP_GET, [](AsyncWebServerRequest *request)
               {
-      digitalWrite(ledPin, HIGH);
+      alarmON();
       request->send(LittleFS, "/index.html", "text/html", false, processor); });
 
     // Route to set GPIO state to LOW
     server.on("/off", HTTP_GET, [](AsyncWebServerRequest *request)
               {
-      digitalWrite(ledPin, LOW);
+            alarmOFF();
       request->send(LittleFS, "/index.html", "text/html", false, processor); });
 
     // Route to set GPIO state to LOW
@@ -232,50 +263,75 @@ void setup()
 
     server.on("/", HTTP_POST, [](AsyncWebServerRequest *request)
               {
-      int params = request->params();
-      for(int i=0;i<params;i++){
-        const AsyncWebParameter* p = request->getParam(i);
-        if(p->isPost()){
-          // HTTP POST ssid value
-          if (p->name() == PARAM_INPUT_1) {
-            ssid = p->value().c_str();
-            Serial.print("SSID set to: ");
-            Serial.println(ssid);
-            // Write file to save value
-            writeFile(LittleFS, ssidPath, ssid.c_str());
-          }
-          // HTTP POST pass value
-          if (p->name() == PARAM_INPUT_2) {
-            pass = p->value().c_str();
-            Serial.print("Password set to: ");
-            Serial.println(pass);
-            // Write file to save value
-            writeFile(LittleFS, passPath, pass.c_str());
-          }
-          // HTTP POST ip value
-          if (p->name() == PARAM_INPUT_3) {
-            ip = p->value().c_str();
-            Serial.print("IP Address set to: ");
-            Serial.println(ip);
-            // Write file to save value
-            writeFile(LittleFS, ipPath, ip.c_str());
-          }
-          // HTTP POST gateway value
-          if (p->name() == PARAM_INPUT_4) {
-            gateway = p->value().c_str();
-            Serial.print("Gateway set to: ");
-            Serial.println(gateway);
-            // Write file to save value
-            writeFile(LittleFS, gatewayPath, gateway.c_str());
-          }
-          //Serial.printf("POST[%s]: %s\n", p->name().c_str(), p->value().c_str());
-        }
-      }
-      request->send(200, "text/plain", ip);
-      delay(3000);
-      ESP.restart(); });
+                int params = request->params();
+                for (int i = 0; i < params; i++)
+                {
+                  const AsyncWebParameter *p = request->getParam(i);
+                  if (p->isPost())
+                  {
+                    // HTTP POST ssid value
+                    if (p->name() == PARAM_INPUT_1)
+                    {
+                      ssid = p->value().c_str();
+                      Serial.print("SSID set to: ");
+                      Serial.println(ssid);
+                      // Write file to save value
+                      writeFile(LittleFS, ssidPath, ssid.c_str());
+                    }
+                    // HTTP POST pass value
+                    if (p->name() == PARAM_INPUT_2)
+                    {
+                      pass = p->value().c_str();
+                      Serial.print("Password set to: ");
+                      Serial.println(pass);
+                      // Write file to save value
+                      writeFile(LittleFS, passPath, pass.c_str());
+                    }
+                    // HTTP POST ip value
+                    if (p->name() == PARAM_INPUT_3)
+                    {
+                      ip = p->value().c_str();
+                      Serial.print("IP Address set to: ");
+                      Serial.println(ip);
+                      // Write file to save value
+                      writeFile(LittleFS, ipPath, ip.c_str());
+                    }
+                    // HTTP POST gateway value
+                    if (p->name() == PARAM_INPUT_4)
+                    {
+                      gateway = p->value().c_str();
+                      Serial.print("Gateway set to: ");
+                      Serial.println(gateway);
+                      // Write file to save value
+                      writeFile(LittleFS, gatewayPath, gateway.c_str());
+                    }
+                    // Serial.printf("POST[%s]: %s\n", p->name().c_str(), p->value().c_str());
+                  }
+                }
+                request->send(200, "text/plain", WiFi.macAddress()); });
+
+    server.on("/restart", HTTP_GET, [](AsyncWebServerRequest *request)
+              { esp_restart(); });
     server.begin();
   }
 }
 
-void loop() {}
+void loop()
+{
+  int analogSensor = analogRead(A0);
+
+  Serial.print("Pin A0: ");
+  Serial.println(analogSensor);
+
+  if (analogSensor > sensorThres)
+  {
+    alarmON();
+    delay(3000);
+  }
+  else
+  {
+    alarmOFF();
+  }
+
+  delay(500);
+}
