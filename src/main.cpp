@@ -413,8 +413,6 @@ void loop()
   if (webSocket.connectedClients() > 0)
   {
     webSocket.broadcastTXT(analogStringSensor);
-
-    delay(200);
   }
 
   Serial.print("Pin A0: ");
