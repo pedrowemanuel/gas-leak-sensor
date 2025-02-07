@@ -8,40 +8,45 @@
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
 #include <AsyncTCP.h>
-#include "LittleFS.h"
+#include "SPIFFS.h"
+#include <WebSocketsServer.h>
 
 #define SSID_ESP "GAS-LEAK-SENSOR:200"
+
 #define LED_PIN 2
 #define BUZZER_PIN 23
 #define A0_PIN A0
 #define D0_PIN 25
-
-// Your threshold value
-int sensorThres = 2000;
+#define SENSOR_THRESHOLD 1000
 
 // Create AsyncWebServer object on port 80
 AsyncWebServer server(80);
+
+WebSocketsServer webSocket(81);
 
 // Search for parameter in HTTP POST request
 const char *PARAM_INPUT_1 = "ssid";
 const char *PARAM_INPUT_2 = "pass";
 const char *PARAM_INPUT_3 = "ip";
 const char *PARAM_INPUT_4 = "gateway";
+const char *PARAM_INPUT_5 = "websocketIP";
 
 // Variables to save values from HTML form
 String ssid;
 String pass;
 String ip;
 String gateway;
+String websocketIP;
 
 // File paths to save input values permanently
 const char *ssidPath = "/ssid.txt";
 const char *passPath = "/pass.txt";
 const char *ipPath = "/ip.txt";
 const char *gatewayPath = "/gateway.txt";
+const char *websocketIPPath = "/websocketip.txt";
 
-// IPAddress localIP;
-IPAddress localIP(192, 168, 1, 201); // hardcoded
+IPAddress localIP;
+// IPAddress localIP(192, 168, 1, 201); // hardcoded
 
 // Set your Gateway IP address
 IPAddress localGateway;
@@ -54,17 +59,18 @@ const long interval = 10000; // interval to wait for Wi-Fi connection (milliseco
 
 String alarmState;
 
-// Initialize LittleFS
-void initLittleFS()
+// Initialize SPIFFS
+void initSPIFFS()
 {
-  if (!LittleFS.begin(true))
+  if (!SPIFFS.begin(true))
   {
-    Serial.println("An error has occurred while mounting LittleFS");
+    Serial.println("An error has occurred while mounting SPIFFS");
+    return;
   }
-  Serial.println("LittleFS mounted successfully");
+  Serial.println("SPIFFS mounted successfully");
 }
 
-// Read File from LittleFS
+// Read File from SPIFFS
 String readFile(fs::FS &fs, const char *path)
 {
   Serial.printf("Reading file: %s\r\n", path);
@@ -85,7 +91,7 @@ String readFile(fs::FS &fs, const char *path)
   return fileContent;
 }
 
-// Write file to LittleFS
+// Write file to SPIFFS
 void writeFile(fs::FS &fs, const char *path, const char *message)
 {
   Serial.printf("Writing file: %s\r\n", path);
@@ -109,7 +115,7 @@ void writeFile(fs::FS &fs, const char *path, const char *message)
 // Initialize WiFi
 bool initWiFi()
 {
-  if (ssid == "" || ip == "")
+  if (ssid == "" || ip == "" || websocketIP == "")
   {
     Serial.println("Undefined SSID or IP address.");
     return false;
@@ -185,84 +191,52 @@ void alarmOFF()
   digitalWrite(BUZZER_PIN, LOW);
 }
 
-void setup()
+void reset()
 {
-  // Serial port for debugging purposes
-  Serial.begin(115200);
+  writeFile(SPIFFS, ssidPath, "");
+  writeFile(SPIFFS, passPath, "");
+  writeFile(SPIFFS, ipPath, "");
+  writeFile(SPIFFS, websocketIPPath, "");
 
-  initLittleFS();
+  esp_restart();
+}
 
-  // Set GPIO 2 as an OUTPUT
-  pinMode(LED_PIN, OUTPUT);
-  pinMode(BUZZER_PIN, OUTPUT); // Define o PINO do buzzer como saída
-  pinMode(A0_PIN, INPUT);
-  pinMode(D0_PIN, INPUT);
+TaskHandle_t ledTaskHandle; // Variável para armazenar a task
 
-  alarmOFF();
+// Função da task para acender o LED por 5 segundos
+void ledTask(void *parameter)
+{
 
-  // Load values saved in LittleFS
-  ssid = readFile(LittleFS, ssidPath);
-  pass = readFile(LittleFS, passPath);
-  ip = readFile(LittleFS, ipPath);
-  gateway = readFile(LittleFS, gatewayPath);
+  digitalWrite(LED_PIN, HIGH);          // Acende o LED
+  vTaskDelay(500 / portTICK_PERIOD_MS); // Espera
+  digitalWrite(LED_PIN, LOW);           // Apaga o LED
+  vTaskDelay(500 / portTICK_PERIOD_MS); // Espera
+  digitalWrite(LED_PIN, HIGH);          // Apaga o LED
 
-  Serial.println(ssid);
-  Serial.println(pass);
-  Serial.println(ip);
-  Serial.println(gateway);
+  ledTaskHandle = NULL; // Reseta o handle da task
+  vTaskDelete(NULL);    // Deleta a própria task quando terminar
+}
 
-  if (initWiFi())
-  {
-    // Route for root / web page
-    server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
-              { request->send(LittleFS, "/index.html", "text/html", false, processor); });
-    server.serveStatic("/", LittleFS, "/");
+void initWebServerHTTP()
+{
+  // Connect to Wi-Fi network with SSID and password
+  Serial.println("Setting AP (Access Point)");
+  // NULL sets an open Access Point
+  WiFi.softAP(SSID_ESP, NULL);
 
-    // Route to set GPIO state to HIGH
-    server.on("/on", HTTP_GET, [](AsyncWebServerRequest *request)
-              {
-      alarmON();
-      request->send(LittleFS, "/index.html", "text/html", false, processor); });
+  IPAddress IP = WiFi.softAPIP();
+  Serial.print("AP IP address: ");
+  Serial.println(IP);
 
-    // Route to set GPIO state to LOW
-    server.on("/off", HTTP_GET, [](AsyncWebServerRequest *request)
-              {
-            alarmOFF();
-      request->send(LittleFS, "/index.html", "text/html", false, processor); });
+  // Web Server Root URL
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
+            { request->send(SPIFFS, "/wifimanager.html", "text/html");
+      Serial.println("wifimanager.html foi acessada!"); });
 
-    // Route to set GPIO state to LOW
-    server.on("/reset", HTTP_GET, [](AsyncWebServerRequest *request)
-              {
+  server.serveStatic("/", SPIFFS, "/");
 
-          writeFile(LittleFS, ssidPath, "");
-          writeFile(LittleFS, passPath, "");
-          writeFile(LittleFS, ipPath, "");
-
-          request->send(LittleFS, "/wifimanager.html", "text/html", false, processor);
-
-          esp_restart(); });
-
-    server.begin();
-  }
-  else
-  {
-    // Connect to Wi-Fi network with SSID and password
-    Serial.println("Setting AP (Access Point)");
-    // NULL sets an open Access Point
-    WiFi.softAP(SSID_ESP, NULL);
-
-    IPAddress IP = WiFi.softAPIP();
-    Serial.print("AP IP address: ");
-    Serial.println(IP);
-
-    // Web Server Root URL
-    server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
-              { request->send(LittleFS, "/wifimanager.html", "text/html"); });
-
-    server.serveStatic("/", LittleFS, "/");
-
-    server.on("/", HTTP_POST, [](AsyncWebServerRequest *request)
-              {
+  server.on("/", HTTP_POST, [](AsyncWebServerRequest *request)
+            {
                 int params = request->params();
                 for (int i = 0; i < params; i++)
                 {
@@ -276,7 +250,7 @@ void setup()
                       Serial.print("SSID set to: ");
                       Serial.println(ssid);
                       // Write file to save value
-                      writeFile(LittleFS, ssidPath, ssid.c_str());
+                      writeFile(SPIFFS, ssidPath, ssid.c_str());
                     }
                     // HTTP POST pass value
                     if (p->name() == PARAM_INPUT_2)
@@ -285,7 +259,7 @@ void setup()
                       Serial.print("Password set to: ");
                       Serial.println(pass);
                       // Write file to save value
-                      writeFile(LittleFS, passPath, pass.c_str());
+                      writeFile(SPIFFS, passPath, pass.c_str());
                     }
                     // HTTP POST ip value
                     if (p->name() == PARAM_INPUT_3)
@@ -294,7 +268,7 @@ void setup()
                       Serial.print("IP Address set to: ");
                       Serial.println(ip);
                       // Write file to save value
-                      writeFile(LittleFS, ipPath, ip.c_str());
+                      writeFile(SPIFFS, ipPath, ip.c_str());
                     }
                     // HTTP POST gateway value
                     if (p->name() == PARAM_INPUT_4)
@@ -303,30 +277,153 @@ void setup()
                       Serial.print("Gateway set to: ");
                       Serial.println(gateway);
                       // Write file to save value
-                      writeFile(LittleFS, gatewayPath, gateway.c_str());
+                      writeFile(SPIFFS, gatewayPath, gateway.c_str());
+                    }
+
+                    // HTTP POST websocket ip value
+                    if (p->name() == PARAM_INPUT_5)
+                    {
+                      websocketIP = p->value().c_str();
+                      Serial.print("websocket ip set to: ");
+                      Serial.println(websocketIP);
+                      // Write file to save value
+                      writeFile(SPIFFS, websocketIPPath, websocketIP.c_str());
                     }
                     // Serial.printf("POST[%s]: %s\n", p->name().c_str(), p->value().c_str());
                   }
                 }
                 request->send(200, "text/plain", WiFi.macAddress()); });
 
-    server.on("/restart", HTTP_GET, [](AsyncWebServerRequest *request)
-              { esp_restart(); });
-    server.begin();
+  server.on("/restart", HTTP_GET, [](AsyncWebServerRequest *request)
+            { esp_restart(); });
+  server.begin();
+};
+
+void webSocketEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length)
+{
+  String event;
+
+  switch (type)
+  {
+  case WStype_CONNECTED:
+    Serial.printf("📡 Cliente conectado! ID: %u\n", num);
+    webSocket.sendTXT(num, "Conexão estabelecida com ESP32!");
+    break;
+  case WStype_TEXT:
+    Serial.printf("📩 Recebido do Cliente: %s\n", payload);
+
+    event = String((char *)payload);
+    webSocket.sendTXT(num, "🔄 Mensagem recebida: " + event);
+
+    if (event == "on")
+    {
+      alarmON();
+    }
+
+    if (event == "off")
+    {
+      alarmOFF();
+    }
+
+    if (event == "reset")
+    {
+      reset();
+    }
+
+    break;
+  case WStype_DISCONNECTED:
+    Serial.printf("❌ Cliente desconectado! ID: %u\n", num);
+    break;
+  }
+}
+
+void initWebSocket(String ip)
+{
+  IPAddress localWebsocketIP;
+
+  if (ip == "")
+  {
+    Serial.println("Undefined WebsocketIP address.");
+    return;
+  }
+
+  localWebsocketIP.fromString(ip.c_str());
+
+  IPAddress subnet(255, 255, 255, 0);
+
+  WiFi.softAPConfig(localWebsocketIP, localWebsocketIP, subnet);
+  WiFi.softAP(SSID_ESP, "");
+
+  Serial.println("🚀 Wi-Fi AP Criado!");
+  Serial.print("WebSocket disponível em: ws://");
+  Serial.print(WiFi.softAPIP());
+  Serial.println(":81");
+
+  webSocket.begin();
+  webSocket.onEvent(webSocketEvent);
+}
+
+void setup()
+{
+  // Serial port for debugging purposes
+  Serial.begin(115200);
+
+  initSPIFFS();
+
+  // Set GPIO 2 as an OUTPUT
+  pinMode(LED_PIN, OUTPUT);
+  pinMode(BUZZER_PIN, OUTPUT); // Define o PINO do buzzer como saída
+  pinMode(A0_PIN, INPUT);
+  pinMode(D0_PIN, INPUT);
+
+  alarmOFF();
+
+  // Load values saved in SPIFFS
+  ssid = readFile(SPIFFS, ssidPath);
+  pass = readFile(SPIFFS, passPath);
+  ip = readFile(SPIFFS, ipPath);
+  gateway = readFile(SPIFFS, gatewayPath);
+  websocketIP = readFile(SPIFFS, websocketIPPath);
+
+  Serial.println(ssid);
+  Serial.println(pass);
+  Serial.println(ip);
+  Serial.println(gateway);
+  Serial.println(websocketIP);
+
+  if (initWiFi())
+  {
+    initWebSocket(websocketIP);
+  }
+  else
+  {
+    initWebServerHTTP();
   }
 }
 
 void loop()
 {
   int analogSensor = analogRead(A0_PIN);
+  String analogStringSensor = String(analogSensor);
+
   int digitalSensor = digitalRead(D0_PIN);
+
+  webSocket.loop();
+
+  if (webSocket.connectedClients() > 0)
+  {
+    webSocket.broadcastTXT(analogStringSensor);
+
+    delay(200);
+  }
 
   Serial.print("Pin A0: ");
   Serial.println(analogSensor);
 
-  Serial.print("Pin D0: ");
-  Serial.println(digitalSensor);
+  // Serial.print("Pin D0: ");
+  // Serial.println(digitalSensor);
 
+  // GENRENCIA O ALARME CRITICO (BUZZER + LED CONSTANTE)
   if (!digitalSensor)
   {
     alarmON();
@@ -334,7 +431,16 @@ void loop()
   else
   {
     alarmOFF();
+
+    // GENRENCIA O ALARME PREVENTIVO ( LED PISCANDO)
+    if (analogSensor > SENSOR_THRESHOLD)
+    {
+      if (ledTaskHandle == NULL)
+      {
+        xTaskCreate(ledTask, "LedTask", 1000, NULL, 1, &ledTaskHandle);
+      }
+    }
   }
 
-  delay(500);
+  delay(200);
 }
