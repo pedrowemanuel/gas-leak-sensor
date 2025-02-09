@@ -5,6 +5,7 @@
   The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 ***/
 #include <Arduino.h>
+#include <esp_now.h>
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
 #include <AsyncTCP.h>
@@ -58,6 +59,11 @@ unsigned long previousMillis = 0;
 const long interval = 10000; // interval to wait for Wi-Fi connection (milliseconds)
 
 String alarmState;
+
+//variaveis para o espnow
+uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};//MAC do esp que será enviado
+uint8_t command;// HIGH ou LOW
+esp_now_peer_info_t peerInfo;
 
 // Initialize SPIFFS
 void initSPIFFS()
@@ -363,6 +369,31 @@ void initWebSocket(String ip)
   webSocket.onEvent(webSocketEvent);
 }
 
+void sendEspNow() {
+  command = HIGH; // Enviar comando para ligar o buzzer
+  esp_now_send(broadcastAddress, &command, sizeof(command));
+
+  Serial.println("Sent HIGH signal");
+}
+
+void prepareEspNow() {
+  WiFi.mode(WIFI_STA);
+
+  if (esp_now_init() != ESP_OK) {
+      Serial.println("Error initializing ESP-NOW");
+      return;
+  }
+
+  memcpy(peerInfo.peer_addr, broadcastAddress, 6);
+  peerInfo.channel = 0;
+  peerInfo.encrypt = false;
+
+  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+      Serial.println("Failed to add peer");
+      return;
+  }
+}
+
 void setup()
 {
   // Serial port for debugging purposes
@@ -394,11 +425,13 @@ void setup()
   if (initWiFi())
   {
     initWebSocket(websocketIP);
+    prepareEspNow();
   }
   else
   {
     initWebServerHTTP();
   }
+  
 }
 
 void loop()
@@ -425,6 +458,7 @@ void loop()
   if (!digitalSensor)
   {
     alarmON();
+    sendEspNow();
   }
   else
   {
