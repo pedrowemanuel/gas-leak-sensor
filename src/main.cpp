@@ -60,9 +60,9 @@ const long interval = 10000; // interval to wait for Wi-Fi connection (milliseco
 
 String alarmState;
 
-//variaveis para o espnow
-uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};//MAC do esp que será enviado
-uint8_t command;// HIGH ou LOW
+// variaveis para o espnow
+uint8_t broadcastAddress[] = {0x84, 0xCC, 0xA8, 0x5E, 0x72, 0x38}; // MAC do esp que será enviado
+uint8_t command;                                                   // HIGH ou LOW
 esp_now_peer_info_t peerInfo;
 
 // Initialize SPIFFS
@@ -185,16 +185,62 @@ String processor(const String &var)
   return String();
 }
 
+void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
+{
+  Serial.print("\r\nLast Packet Send Status:\t");
+  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
+}
+
+void sendEspNow(uint8_t command)
+{
+  // if (esp_now_is_peer_exist(peerInfo.peer_addr))
+  // {
+  //   esp_now_send(broadcastAddress, &command, sizeof(command));
+
+  //   Serial.println("Sent HIGH signal");
+  // }
+}
+
+void prepareEspNow()
+{
+
+  if (esp_now_init() != ESP_OK)
+  {
+    Serial.println("Error initializing ESP-NOW");
+    return;
+  }
+
+  // Once ESPNow is successfully Init, we will register for Send CB to
+  // get the status of Trasnmitted packet
+  esp_now_register_send_cb(OnDataSent);
+
+  memcpy(peerInfo.peer_addr, broadcastAddress, 6);
+  peerInfo.channel = 0;
+  peerInfo.encrypt = false;
+
+  if (esp_now_add_peer(&peerInfo) != ESP_OK)
+  {
+    Serial.println("Failed to add peer");
+    return;
+  }
+}
+
 void alarmON()
 {
   digitalWrite(LED_PIN, HIGH);
   digitalWrite(BUZZER_PIN, HIGH);
+  sendEspNow(HIGH);
+
+  delay(5000);
 }
 
 void alarmOFF()
 {
   digitalWrite(LED_PIN, LOW);
   digitalWrite(BUZZER_PIN, LOW);
+  sendEspNow(LOW);
+
+  delay(120000);
 }
 
 void reset()
@@ -369,31 +415,6 @@ void initWebSocket(String ip)
   webSocket.onEvent(webSocketEvent);
 }
 
-void sendEspNow() {
-  command = HIGH; // Enviar comando para ligar o buzzer
-  esp_now_send(broadcastAddress, &command, sizeof(command));
-
-  Serial.println("Sent HIGH signal");
-}
-
-void prepareEspNow() {
-  WiFi.mode(WIFI_STA);
-
-  if (esp_now_init() != ESP_OK) {
-      Serial.println("Error initializing ESP-NOW");
-      return;
-  }
-
-  memcpy(peerInfo.peer_addr, broadcastAddress, 6);
-  peerInfo.channel = 0;
-  peerInfo.encrypt = false;
-
-  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
-      Serial.println("Failed to add peer");
-      return;
-  }
-}
-
 void setup()
 {
   // Serial port for debugging purposes
@@ -425,13 +446,13 @@ void setup()
   if (initWiFi())
   {
     initWebSocket(websocketIP);
-    prepareEspNow();
   }
   else
   {
     initWebServerHTTP();
   }
-  
+
+  prepareEspNow();
 }
 
 void loop()
@@ -458,7 +479,6 @@ void loop()
   if (!digitalSensor)
   {
     alarmON();
-    sendEspNow();
   }
   else
   {
