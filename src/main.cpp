@@ -410,18 +410,20 @@ void loop()
   String analogStringSensor = String(analogSensor);
 
   int digitalSensor = digitalRead(D0_PIN);
+  String digitalStringSensor = String(digitalSensor);
+
   webSocket.loop();
 
   if (webSocket.connectedClients() > 0)
   {
-    webSocket.broadcastTXT(analogStringSensor);
+    webSocket.broadcastTXT(digitalStringSensor);
   }
 
   Serial.print("Pin A0: ");
   Serial.println(analogSensor);
 
-  // Serial.print("Pin D0: ");
-  // Serial.println(digitalSensor);
+  Serial.print("Pin D0: ");
+  Serial.println(digitalSensor);
 
   // GENRENCIA O ALARME CRITICO (BUZZER + LED CONSTANTE)
   if (!digitalSensor)
