@@ -10,6 +10,8 @@
 #include <AsyncTCP.h>
 #include "SPIFFS.h"
 #include <WebSocketsServer.h>
+#include <UniversalTelegramBot.h>
+#include <WiFiClientSecure.h>
 
 #define SSID_ESP "GAS-LEAK-SENSOR:200"
 
@@ -18,6 +20,22 @@
 #define A0_PIN A0
 #define D0_PIN 25
 #define SENSOR_THRESHOLD 1000
+
+// Initialize Telegram BOT
+#define BOTtoken "7745094490:AAFtoYY5l-jc7JPoV7PenqM1yQKBMYkqioM" // your Bot Token (Get from Botfather)
+
+// Use @myidbot to find out the chat ID of an individual or a group
+// Also note that you need to click "start" on a bot before it can
+// message you
+// #define CHAT_ID "5353701390"
+#define CHAT_ID "5135357770"
+
+WiFiClientSecure client;
+UniversalTelegramBot bot(BOTtoken, client);
+
+// Checks for new messages every 1 second.
+int botRequestDelay = 1000;
+unsigned long lastTimeBotRan;
 
 // Create AsyncWebServer object on port 80
 AsyncWebServer server(80);
@@ -125,11 +143,11 @@ bool initWiFi()
   localIP.fromString(ip.c_str());
   localGateway.fromString(gateway.c_str());
 
-  if (!WiFi.config(localIP, localGateway, subnet))
-  {
-    Serial.println("STA Failed to configure");
-    return false;
-  }
+  // if (!WiFi.config(localIP, localGateway, subnet))
+  // {
+  //   Serial.println("STA Failed to configure");
+  //   return false;
+  // }
   WiFi.begin(ssid.c_str(), pass.c_str());
   Serial.println("Connecting to WiFi...");
 
@@ -397,12 +415,15 @@ void setup()
   if (initWiFi())
   {
     initWebSocket(websocketIP);
+    client.setCACert(TELEGRAM_CERTIFICATE_ROOT);
   }
   else
   {
     initWebServerHTTP();
   }
 }
+
+int digitalSensorBefore = 1;
 
 void loop()
 {
@@ -418,6 +439,13 @@ void loop()
   {
     webSocket.broadcastTXT(digitalStringSensor);
   }
+
+  if (digitalSensorBefore != digitalSensor)
+  {
+    bot.sendMessage(CHAT_ID, "oi yan", "");
+  }
+
+  digitalSensorBefore = digitalSensor;
 
   Serial.print("Pin A0: ");
   Serial.println(analogSensor);
