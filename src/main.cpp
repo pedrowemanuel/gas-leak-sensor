@@ -251,6 +251,7 @@ void handleNewMessagesTelegram(UniversalTelegramBot bot, String telegramToken, i
     if (text == "/start")
     {
       writeFile(SPIFFS, chatIDPath, chat_id.c_str());
+      chatID = readFile(SPIFFS, chatIDPath);
 
       String welcome = "Bem vindo, " + from_name + ".\n";
       welcome += "A partir de agora você receberá atualizações quando houver mudança do sensor.\n\n";
@@ -259,8 +260,10 @@ void handleNewMessagesTelegram(UniversalTelegramBot bot, String telegramToken, i
   }
 }
 
-void loopTelegram(UniversalTelegramBot bot, String telegramToken)
+void loopTelegram(String telegramToken)
 {
+  UniversalTelegramBot bot(telegramToken, client);
+
   if (millis() > lastTimeBotRan + botRequestDelay)
   {
     int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
@@ -443,6 +446,7 @@ void setup()
   ip = readFile(SPIFFS, ipPath);
   telegramToken = readFile(SPIFFS, telegramTokenPath);
   websocketIP = readFile(SPIFFS, websocketIPPath);
+  chatID = readFile(SPIFFS, chatIDPath);
 
   Serial.println(ssid);
   Serial.println(pass);
@@ -495,7 +499,7 @@ void loop()
       }
     }
 
-    loopTelegram(bot, telegramToken);
+    loopTelegram(telegramToken);
   }
 
   digitalSensorBefore = digitalSensor;
