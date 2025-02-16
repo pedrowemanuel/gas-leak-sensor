@@ -16,22 +16,12 @@
 #define SSID_ESP "GAS-LEAK-SENSOR:200"
 
 #define LED_PIN 2
-#define BUZZER_PIN 23
-#define A0_PIN A0
-#define D0_PIN 25
-#define SENSOR_THRESHOLD 1000
-
-// Initialize Telegram BOT
-#define BOTtoken "7745094490:AAFtoYY5l-jc7JPoV7PenqM1yQKBMYkqioM" // your Bot Token (Get from Botfather)
-
-// Use @myidbot to find out the chat ID of an individual or a group
-// Also note that you need to click "start" on a bot before it can
-// message you
-// #define CHAT_ID "5353701390"
-#define CHAT_ID "5135357770"
+#define BUZZER_PIN 13
+#define A0_PIN GPIO_NUM_32
+#define D0_PIN GPIO_NUM_25
+#define SENSOR_THRESHOLD 400
 
 WiFiClientSecure client;
-UniversalTelegramBot bot(BOTtoken, client);
 
 // Checks for new messages every 1 second.
 int botRequestDelay = 1000;
@@ -46,22 +36,28 @@ WebSocketsServer webSocket(81);
 const char *PARAM_INPUT_1 = "ssid";
 const char *PARAM_INPUT_2 = "pass";
 const char *PARAM_INPUT_3 = "ip";
-const char *PARAM_INPUT_4 = "gateway";
+const char *PARAM_INPUT_4 = "telegramToken";
 const char *PARAM_INPUT_5 = "websocketIP";
 
 // Variables to save values from HTML form
 String ssid;
 String pass;
 String ip;
-String gateway;
+String telegramToken;
 String websocketIP;
+
+// Use @myidbot to find out the chat ID of an individual or a group
+// Also note that you need to click "start" on a bot before it can
+// message you
+String chatID;
 
 // File paths to save input values permanently
 const char *ssidPath = "/ssid.txt";
 const char *passPath = "/pass.txt";
 const char *ipPath = "/ip.txt";
-const char *gatewayPath = "/gateway.txt";
+const char *telegramTokenPath = "/telegramToken.txt";
 const char *websocketIPPath = "/websocketip.txt";
+const char *chatIDPath = "/chatid.txt";
 
 IPAddress localIP;
 // IPAddress localIP(192, 168, 1, 201); // hardcoded
@@ -141,7 +137,7 @@ bool initWiFi()
 
   WiFi.mode(WIFI_STA);
   localIP.fromString(ip.c_str());
-  localGateway.fromString(gateway.c_str());
+  localGateway.fromString(telegramToken.c_str());
 
   // if (!WiFi.config(localIP, localGateway, subnet))
   // {
@@ -172,9 +168,6 @@ bool initWiFi()
 
   Serial.print("MAC Address: ");
   Serial.println(WiFi.macAddress());
-
-  Serial.print("gateway: ");
-  Serial.println(WiFi.gatewayIP());
 
   return true;
 }
@@ -217,6 +210,7 @@ void reset()
   writeFile(SPIFFS, passPath, "");
   writeFile(SPIFFS, ipPath, "");
   writeFile(SPIFFS, websocketIPPath, "");
+  writeFile(SPIFFS, chatIDPath, "");
 
   esp_restart();
 }
@@ -235,6 +229,50 @@ void ledTask(void *parameter)
 
   ledTaskHandle = NULL; // Reseta o handle da task
   vTaskDelete(NULL);    // Deleta a própria task quando terminar
+}
+
+// Handle what happens when you receive new messages
+void handleNewMessagesTelegram(UniversalTelegramBot bot, String telegramToken, int numNewMessages)
+{
+  Serial.println("handleNewMessages");
+  Serial.println(String(numNewMessages));
+
+  for (int i = 0; i < numNewMessages; i++)
+  {
+    // Chat id of the requester
+    String chat_id = String(bot.messages[i].chat_id);
+
+    // Print the received message
+    String text = bot.messages[i].text;
+    Serial.println(text);
+
+    String from_name = bot.messages[i].from_name;
+
+    if (text == "/start")
+    {
+      writeFile(SPIFFS, chatIDPath, chat_id.c_str());
+
+      String welcome = "Bem vindo, " + from_name + ".\n";
+      welcome += "A partir de agora você receberá atualizações quando houver mudança do sensor.\n\n";
+      bot.sendMessage(chat_id, welcome, "");
+    }
+  }
+}
+
+void loopTelegram(UniversalTelegramBot bot, String telegramToken)
+{
+  if (millis() > lastTimeBotRan + botRequestDelay)
+  {
+    int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
+
+    while (numNewMessages)
+    {
+      Serial.println("got response");
+      handleNewMessagesTelegram(bot, telegramToken, numNewMessages);
+      numNewMessages = bot.getUpdates(bot.last_message_received + 1);
+    }
+    lastTimeBotRan = millis();
+  }
 }
 
 void initWebServerHTTP()
@@ -290,14 +328,14 @@ void initWebServerHTTP()
                       // Write file to save value
                       writeFile(SPIFFS, ipPath, ip.c_str());
                     }
-                    // HTTP POST gateway value
+                    // HTTP POST telegramToken value
                     if (p->name() == PARAM_INPUT_4)
                     {
-                      gateway = p->value().c_str();
+                      telegramToken = p->value().c_str();
                       Serial.print("Gateway set to: ");
-                      Serial.println(gateway);
+                      Serial.println(telegramToken);
                       // Write file to save value
-                      writeFile(SPIFFS, gatewayPath, gateway.c_str());
+                      writeFile(SPIFFS, telegramTokenPath, telegramToken.c_str());
                     }
 
                     // HTTP POST websocket ip value
@@ -403,13 +441,13 @@ void setup()
   ssid = readFile(SPIFFS, ssidPath);
   pass = readFile(SPIFFS, passPath);
   ip = readFile(SPIFFS, ipPath);
-  gateway = readFile(SPIFFS, gatewayPath);
+  telegramToken = readFile(SPIFFS, telegramTokenPath);
   websocketIP = readFile(SPIFFS, websocketIPPath);
 
   Serial.println(ssid);
   Serial.println(pass);
   Serial.println(ip);
-  Serial.println(gateway);
+  Serial.println(telegramToken);
   Serial.println(websocketIP);
 
   if (initWiFi())
@@ -433,16 +471,31 @@ void loop()
   int digitalSensor = digitalRead(D0_PIN);
   String digitalStringSensor = String(digitalSensor);
 
+  // Enviando mensagens via websocket
   webSocket.loop();
-
   if (webSocket.connectedClients() > 0)
   {
-    webSocket.broadcastTXT(digitalStringSensor);
-  }
+    webSocket.broadcastTXT("Sinal analógico: " + analogStringSensor + "ppm");
 
-  if (digitalSensorBefore != digitalSensor)
+    if (digitalSensorBefore != digitalSensor)
+    {
+      webSocket.broadcastTXT(digitalStringSensor);
+    }
+  }
+  // Enviando mensagens via telegram
+  if (telegramToken)
   {
-    bot.sendMessage(CHAT_ID, "oi yan", "");
+    UniversalTelegramBot bot(telegramToken, client);
+
+    if (chatID)
+    {
+      if (digitalSensorBefore != digitalSensor && !digitalSensor)
+      {
+        bot.sendMessage(chatID, "Aviso! O sensor de vazamento de gás disparou o alarme!", "");
+      }
+    }
+
+    loopTelegram(bot, telegramToken);
   }
 
   digitalSensorBefore = digitalSensor;
