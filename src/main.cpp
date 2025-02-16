@@ -483,11 +483,11 @@ void loop()
     }
   }
   // Enviando mensagens via telegram
-  if (telegramToken)
+  if (telegramToken != "")
   {
     UniversalTelegramBot bot(telegramToken, client);
 
-    if (chatID)
+    if (chatID != "")
     {
       if (digitalSensorBefore != digitalSensor && !digitalSensor)
       {
